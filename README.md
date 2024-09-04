@@ -31,16 +31,74 @@
 
 Структура файлов проекта:
 
-	•	index.html: Главная страница, содержащая элементы управления и интерфейс пользователя.
-	•	app.js: Основная логика, включая получение данных, обучение модели и вывод результатов.
-	•	btc_sequences.js и eth_sequences.js: Исторические данные по криптовалютам, сохраненные в формате JavaScript.
-	•	brain.min.js: Библиотека для работы с искусственным интеллектом и машинным обучением.
+	•	index.html: Главная страница.
+	•	app.js: Логика загрузки данных, обучения модели и отображения результатов.
+	•	btc_sequences.js, eth_sequences.js: Исторические данные по криптовалютам.
+	•	brain.min.js: Библиотека машинного обучения.
 
 Логика работы:
 
-	1.	Получение данных: Данные о ценах на криптовалюты (BTC и ETH) загружаются с помощью API CoinGecko. Они нормализуются и используются для обучения модели.
-	2.	Настройка параметров: С помощью слайдеров пользователь может задать параметры обучения модели (например, количество итераций и скрытых нейронов).
-	3.	Обучение модели: Используется рекуррентная нейронная сеть (LSTM), которая обучается на исторических данных для предсказания следующей цены.
-	4.	Прогноз: После обучения модель предсказывает цену на следующие 24 часа, а результаты выводятся на экран, где можно увидеть текущее значение, прогнозируемое значение и процентное изменение.
+	1.	Данные загружаются через API CoinGecko и нормализуются.
+	2.	Пользователь настраивает параметры обучения через слайдеры.
+	3.	Модель обучается и предсказывает будущие цены на основе исторических данных.
+	4.	Результаты отображаются в формате: текущее значение, прогноз, разница и процентное изменение.
 
-Этот проект показывает, как с помощью методов промпт-инжиниринга и AI можно построить простой, но эффективный инструмент для анализа и прогнозирования цен на криптовалюты.
+Код для Kaggle:
+
+# 1. Импорт библиотек
+import requests
+import pandas as pd
+import json
+
+# 2. Список криптовалют
+cryptocurrencies = [
+    {'id': 'bitcoin', 'name': 'btc'},
+    {'id': 'ethereum', 'name': 'eth'}
+]
+
+# 3. Функция для получения данных с CoinGecko
+def get_data(coin_id, vs_currency='usd', days=365):
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+    params = {'vs_currency': vs_currency, 'days': days}
+    response = requests.get(url, params=params)
+    data = response.json()
+    return pd.DataFrame(data['prices'], columns=['timestamp', 'price'])
+
+# 4. Функция для создания последовательностей
+def create_sequences(data, seq_length=60):
+    sequences = []
+    for i in range(len(data) - seq_length):
+        seq = data.iloc[i:i + seq_length]['price_normalized'].values.tolist()
+        label = data.iloc[i + seq_length]['price_normalized']
+        sequences.append((seq, label))
+    return sequences
+
+# 5. Функция для сохранения данных в JS файлы
+def save_sequences_to_js(sequences, var_name, filename):
+    js_content = f"export const {var_name} = {json.dumps(sequences)};"
+    with open(filename, 'w') as f:
+        f.write(js_content)
+
+# 6. Функция для сохранения данных в JSON файлы
+def save_sequences_to_json(sequences, filename):
+    with open(filename, 'w') as f:
+        json.dump(sequences, f)
+
+# 7. Подготовка данных для каждой криптовалюты
+for crypto in cryptocurrencies:
+    data = get_data(crypto['id'], 'usd', 365)
+    data['timestamp'] = pd.to_datetime(data['timestamp'], unit='ms')
+    data['price_normalized'] = (data['price'] - data['price'].min()) / (data['price'].max() - data['price'].min())
+    
+    sequences = create_sequences(data)
+    
+    # Сохранение в JS файл
+    save_sequences_to_js(sequences, f"{crypto['name']}Sequences", f"{crypto['name']}_sequences.js")
+    
+    # Сохранение в JSON файл
+    save_sequences_to_json(sequences, f"{crypto['name']}_sequences.json")
+
+# 8. Вывод сообщения о завершении
+print("Данные успешно сохранены для всех криптовалют.")
+
+Этот код загружает исторические данные для BTC и ETH, нормализует их, создает последовательности для обучения модели, а затем сохраняет данные в файлы .js и .json.
