@@ -28,6 +28,7 @@
 	•	В файлах btc_sequences.js и eth_sequences.js обязательно добавьте следующую строку в конце файла, чтобы данные были доступны для использования в браузере:
     •	window.btcSequences = btcSequences;
     •	window.ethSequences = ethSequences;
+    •	И удалить строку export в начале файлов;
 
 Структура файлов проекта:
 
