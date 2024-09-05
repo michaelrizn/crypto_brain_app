@@ -17,7 +17,9 @@ async function getCurrentPrice(coinIds) {
 }
 
 // Функция для предсказания цены на основе последовательностей
-async function predictPrice(sequences, updateProgress) {
+async function predictPrice(sequences, updateProgress, currentPrice) {
+    Math.seedrandom(Date.now());
+
     const hiddenNeurons = parseInt(document.getElementById('hidden-neurons').value);
     const iterations = parseInt(document.getElementById('iterations').value);
     const batchSize = parseInt(document.getElementById('batch-size').value);
@@ -26,10 +28,35 @@ async function predictPrice(sequences, updateProgress) {
 
     const net = new brain.recurrent.LSTMTimeStep({
         inputSize: 1,
-        hiddenLayers: [hiddenNeurons],
-        outputSize: 1
+        hiddenLayers: [hiddenNeurons, Math.floor(hiddenNeurons / 2)],
+        outputSize: 1,
+        learningRate: 0.01,
+        activation: 'tanh'
     });
-    const trainingData = sequences.map(seq => seq[0]);
+    
+    // Проверяем и преобразуем данные
+    const flattenedSequences = sequences.map(seq => Array.isArray(seq[0]) ? seq[0] : seq);
+    const allPrices = flattenedSequences.flat();
+    
+    if (allPrices.length === 0) {
+        throw new Error('Нет данных для обработки');
+    }
+
+    const min = Math.min(...allPrices);
+    const max = Math.max(...allPrices);
+    
+    // Нормализация данных
+    const range = max - min;
+    const normalizedData = flattenedSequences.map(seq => 
+        seq.map(price => (price - min) / (range * 1.5)) // Увеличиваем диапазон на 50%
+    );
+    
+    // Добавление случайного шума к данным
+    const noisyData = normalizedData.map(seq => 
+        seq.map(price => price + (Math.random() - 0.5) * 0.05) // Увеличиваем шум
+    );
+    
+    const trainingData = noisyData;
     
     const trainingConfig = {
         iterations: iterations,
@@ -40,20 +67,68 @@ async function predictPrice(sequences, updateProgress) {
 
     for (let i = 0; i < trainingConfig.iterations; i += trainingConfig.batchSize) {
         await new Promise(resolve => setTimeout(resolve, 0));
-        net.train(trainingData, {
+        const shuffledData = trainingData.sort(() => Math.random() - 0.5);
+        net.train(shuffledData, {
             iterations: trainingConfig.batchSize,
-            learningRate: trainingConfig.learningRate,
+            learningRate: trainingConfig.learningRate * (1 + Math.random() * 0.1 - 0.05),
             errorThresh: trainingConfig.errorThresh
         });
         updateProgress((i + trainingConfig.batchSize) / trainingConfig.iterations * 100);
     }
     
-    const lastSequence = sequences[sequences.length - 1][0];
+    const trends = flattenedSequences.map(seq => calculateTrend(seq));
+    const normalizedTrends = trends.map(trend => (trend - Math.min(...trends)) / (Math.max(...trends) - Math.min(...trends)));
+    
+    const lastSequence = normalizedData[normalizedData.length - 1].concat([normalizedTrends[normalizedTrends.length - 1]]);
+    const normalizedCurrentPrice = (currentPrice - min) / (range * 1.5);
+    lastSequence.push(normalizedCurrentPrice);
     const prediction = net.run(lastSequence);
     
-    const min = Math.min(...lastSequence);
-    const max = Math.max(...lastSequence);
-    return prediction * (max - min) + min;
+    // Нормализованное предсказание
+    console.log('Нормализованное предсказание:', prediction);
+
+    // Денормализация с учетом расширенного диапазона
+    const denormalizedPrediction = prediction * (range * 1.5) + min;
+    console.log('Денормализованное предсказание:', denormalizedPrediction);
+
+    // Расчет процентного изменения
+    const percentageChange = ((denormalizedPrediction - currentPrice) / currentPrice) * 100;
+    console.log('Процентное изменение:', percentageChange.toFixed(4) + '%');
+
+    // Возвращайте процентное изменение вместо абсолютного значения
+    return percentageChange;
+}
+
+function calculateTrend(prices) {
+    if (prices.length < 2) return 0;
+    return (prices[prices.length - 1] - prices[0]) / prices[0];
+}
+
+function calculateVolatility(data, window = 10) {
+    if (data.length < 2) return 0; // Возвращаем 0, если недостаточно данных
+    
+    const returns = [];
+    for (let i = 1; i < data.length; i++) {
+        if (data[i-1] !== 0) { // Проверка деления на ноль
+            returns.push((data[i] - data[i-1]) / data[i-1]);
+        }
+    }
+    
+    if (returns.length === 0) return 0; // Возвращаем 0, если нет валидных возвратов
+    
+    const mean = returns.reduce((sum, val) => sum + val, 0) / returns.length;
+    const squaredDiffs = returns.map(val => Math.pow(val - mean, 2));
+    const variance = squaredDiffs.reduce((sum, val) => sum + val, 0) / returns.length;
+    
+    return Math.sqrt(variance * 252); // Годовая волатильность
+}
+
+function exponentialSmoothing(data, alpha = 0.3) {
+    let result = [data[0]];
+    for (let i = 1; i < data.length; i++) {
+        result.push(alpha * data[i] + (1 - alpha) * result[i-1]);
+    }
+    return result;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -125,12 +200,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 loadingElement.textContent = 'Предсказание цены BTC: 0%';
                 const btcPredictedPrice = await predictPrice(window.btcSequences, progress => {
                     loadingElement.textContent = `Предсказание цены BTC: ${progress.toFixed(0)}%`;
-                });
+                }, btcCurrentPrice);
                 
                 loadingElement.textContent = 'Предсказание цены ETH: 0%';
                 const ethPredictedPrice = await predictPrice(window.ethSequences, progress => {
                     loadingElement.textContent = `Предсказание цены ETH: ${progress.toFixed(0)}%`;
-                });
+                }, ethCurrentPrice);
 
                 // Рассчитываем разницу и процентное изменение
                 const btcDifference = btcPredictedPrice - btcCurrentPrice;
